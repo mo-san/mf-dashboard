@@ -14,6 +14,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { loginWithAuthState } from "./auth/login.js";
 import { hasAuthState } from "./auth/state.js";
 import { createBrowserContext } from "./browser/context.js";
+import { removeInAppMessagesBeforeActions } from "./browser/in-app-message.js";
 import { categorizeCashFlowMonth } from "./category-decision/categorize-cash-flow.js";
 import { loadCategoryDecisionConfig } from "./category-decision/config.js";
 import type {
@@ -134,6 +135,7 @@ export async function runSetupPhase(config: CrawlerConfig): Promise<CrawlerRunti
 
     const context = await createBrowserContext(browser, { useAuthState: true });
     const page = await context.newPage();
+    await removeInAppMessagesBeforeActions(page);
 
     return {
       db,
