@@ -51,6 +51,11 @@ describe("createGroupScope", () => {
     await expect(scope[Symbol.asyncDispose]()).rejects.toThrow("Group switch failed");
 
     expect(select.selectOption).toHaveBeenCalledTimes(3);
+    expect(logger.warn.mock.calls).toEqual([
+      ["Failed to restore group (attempt 1/3): Group switch failed"],
+      ["Failed to restore group (attempt 2/3): Group switch failed"],
+      ["Failed to restore original group after all retries: Group switch failed"],
+    ]);
     const diagnostics = JSON.stringify([...logger.log.mock.calls, ...logger.warn.mock.calls]);
     expect(diagnostics).not.toContain("private-group-id");
     expect(diagnostics).not.toContain("Private Group Name");

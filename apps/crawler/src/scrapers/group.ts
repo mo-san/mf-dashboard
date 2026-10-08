@@ -231,8 +231,11 @@ export async function createGroupScope(
           log("Successfully restored original group");
           return;
         } catch (error) {
+          const reason = sanitizeGroupSwitchError(error);
           if (attempt < MAX_RETRIES) {
-            warn(`Failed to restore group (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
+            warn(
+              `Failed to restore group (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${reason.message}`,
+            );
             // ページ状態をリセットしてリトライ
             try {
               await page.goto(mfUrls.home, {
@@ -243,8 +246,8 @@ export async function createGroupScope(
               // ナビゲーション失敗は次のリトライで再試行
             }
           } else {
-            warn("Failed to restore original group after all retries");
-            throw sanitizeGroupSwitchError(error);
+            warn(`Failed to restore original group after all retries: ${reason.message}`);
+            throw reason;
           }
         }
       }

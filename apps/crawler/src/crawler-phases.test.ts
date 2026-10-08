@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildAccountIdMap } from "@mf-dashboard/db/repository/accounts";
@@ -11,11 +11,14 @@ import type { CashFlowSummary } from "@mf-dashboard/db/types";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { categorizeCashFlowMonth } from "./category-decision/categorize-cash-flow.js";
 import {
+  formatPageLocation,
   getDebugScreenshotPath,
   loadCrawlerConfig,
   runCashFlowHistoryPhase,
   runInstitutionCategoryPhase,
   runSavePhase,
+  saveFailureSnapshot,
+  selectStaleDebugScreenshots,
   type CategoryDecisionRuntime,
 } from "./crawler-phases.js";
 import { createCrawlerProgressReporter } from "./crawler-progress.js";
@@ -231,6 +234,87 @@ describe("getDebugScreenshotPath", () => {
     expect(getDebugScreenshotPath(1234567890, debugDir)).toBe(
       path.join(debugDir, "error-1234567890.png"),
     );
+  });
+});
+
+describe("formatPageLocation", () => {
+  test.each([
+    {
+      name: "クエリとフラグメントを落とす",
+      url: "https://example.invalid/bs/history?token=secret#section",
+      expected: "https://example.invalid/bs/history",
+    },
+    {
+      name: "識別子を含みうるパス要素を伏せる",
+      url: "https://example.invalid/accounts/show/AbC123xyz",
+      expected: "https://example.invalid/accounts/show/:id",
+    },
+    {
+      name: "ルートはそのまま返す",
+      url: "https://example.invalid/",
+      expected: "https://example.invalid/",
+    },
+    { name: "http(s)以外はスキームだけ返す", url: "about:blank", expected: "about:" },
+    { name: "解釈できない値はunknownにする", url: "not a url", expected: "unknown" },
+  ])("$name", ({ url, expected }) => {
+    expect(formatPageLocation(url)).toBe(expected);
+  });
+});
+
+describe("selectStaleDebugScreenshots", () => {
+  test("新しい順に保持数を超えたerror画像だけを返す", () => {
+    const fileNames = ["error-100.png", "error-300.png", "inspect.ts", "error-200.png", "note.png"];
+
+    expect(selectStaleDebugScreenshots(fileNames, 2)).toEqual(["error-100.png"]);
+  });
+
+  test("保持数ちょうどなら何も返さない", () => {
+    expect(selectStaleDebugScreenshots(["error-100.png", "error-200.png"], 2)).toEqual([]);
+  });
+});
+
+describe("saveFailureSnapshot", () => {
+  function createSnapshotPage(screenshot: (options: { path: string }) => Promise<void>) {
+    return {
+      screenshot: vi.fn<(options: { path: string }) => Promise<void>>(screenshot),
+      url: vi.fn<() => string>(() => "https://example.invalid/accounts?token=secret"),
+    } as unknown as Parameters<typeof saveFailureSnapshot>[0];
+  }
+
+  test("画像を保存し、古いerror画像を保持数まで間引く", async () => {
+    const debugDir = await mkdtemp(path.join(os.tmpdir(), "crawler-debug-"));
+    try {
+      await Promise.all(
+        Array.from({ length: 10 }, (_, index) =>
+          writeFile(path.join(debugDir, `error-${index + 1}.png`), ""),
+        ),
+      );
+      const page = createSnapshotPage(async (options) => {
+        await writeFile(options.path, "");
+      });
+
+      await saveFailureSnapshot(page, debugDir);
+
+      const remaining = await readdir(debugDir);
+      expect(remaining).toHaveLength(10);
+      expect(remaining).not.toContain("error-1.png");
+      expect(remaining).toContain("error-2.png");
+    } finally {
+      await rm(debugDir, { recursive: true, force: true });
+    }
+  });
+
+  test("画像の保存に失敗しても例外を投げない", async () => {
+    const debugDir = await mkdtemp(path.join(os.tmpdir(), "crawler-debug-"));
+    try {
+      const page = createSnapshotPage(async () => {
+        throw new Error("page crashed");
+      });
+
+      await expect(saveFailureSnapshot(page, debugDir)).resolves.toBeUndefined();
+    } finally {
+      await rm(debugDir, { recursive: true, force: true });
+    }
   });
 });
 
