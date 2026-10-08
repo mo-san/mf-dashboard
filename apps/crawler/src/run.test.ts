@@ -13,6 +13,7 @@ import {
   runSavePhase,
   runScrapePhase,
   runSetupPhase,
+  saveFailureSnapshot,
 } from "./crawler-phases.js";
 import { CRAWLER_STEPS, createCrawlerProgressReporter } from "./crawler-progress.js";
 import { runCrawler } from "./run.js";
@@ -31,6 +32,7 @@ vi.mock("./crawler-phases.js", () => ({
   runSavePhase: vi.fn<() => void>(),
   runScrapePhase: vi.fn<() => void>(),
   runSetupPhase: vi.fn<() => void>(),
+  saveFailureSnapshot: vi.fn<() => Promise<void>>(),
 }));
 vi.mock("./scrapers/group.js", () => ({ createGroupScope: vi.fn<() => void>() }));
 vi.mock("./web-refresh.js", () => ({ notifyWebRefresh: vi.fn<() => void>() }));
@@ -123,10 +125,44 @@ describe("runCrawler progress", () => {
 
     expect(runScrapePhase).not.toHaveBeenCalled();
     expect(createGroupScope).not.toHaveBeenCalled();
-    expect(handleCrawlerFailure).toHaveBeenCalledWith(
-      authError,
-      expect.anything(),
-      expect.anything(),
+    expect(handleCrawlerFailure).toHaveBeenCalledWith(authError);
+    expect(saveFailureSnapshot).toHaveBeenCalledOnce();
+  });
+
+  test("ブラウザー起動前の失敗では画面の記録を試みない", async () => {
+    const setupError = new Error("browser launch failed");
+    vi.mocked(runSetupPhase).mockRejectedValueOnce(setupError);
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "state.json"), {
+      id: "run-a",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await expect(runCrawler(progress)).rejects.toBe(setupError);
+
+    expect(saveFailureSnapshot).not.toHaveBeenCalled();
+    expect(handleCrawlerFailure).toHaveBeenCalledWith(setupError);
+  });
+
+  test("crawl失敗時はグループ復元より前に画面を1回だけ記録する", async () => {
+    const crawlError = new Error("portfolio scrape failed");
+    const dispose = vi.fn<() => Promise<void>>();
+    vi.mocked(runScrapePhase).mockRejectedValueOnce(crawlError);
+    vi.mocked(createGroupScope).mockResolvedValueOnce({
+      originalGroup: null,
+      [Symbol.asyncDispose]: dispose,
+    });
+    const progress = await createCrawlerProgressReporter(path.join(tempDir, "state.json"), {
+      id: "run-a",
+      source: "test",
+      startedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    await expect(runCrawler(progress)).rejects.toBe(crawlError);
+
+    expect(saveFailureSnapshot).toHaveBeenCalledOnce();
+    expect(vi.mocked(saveFailureSnapshot).mock.invocationCallOrder[0]).toBeLessThan(
+      dispose.mock.invocationCallOrder[0]!,
     );
   });
 
@@ -222,11 +258,7 @@ describe("runCrawler progress", () => {
 
     expect(runNotificationPhase).not.toHaveBeenCalled();
     expect(notifyWebRefresh).not.toHaveBeenCalled();
-    expect(handleCrawlerFailure).toHaveBeenCalledWith(
-      restoreError,
-      expect.anything(),
-      expect.anything(),
-    );
+    expect(handleCrawlerFailure).toHaveBeenCalledWith(restoreError);
   });
 
   test("crawlとグループ復元が両方失敗した場合は元のcrawl errorを保持する", async () => {
@@ -244,11 +276,7 @@ describe("runCrawler progress", () => {
     });
 
     await expect(runCrawler(progress)).rejects.toBe(crawlError);
-    expect(handleCrawlerFailure).toHaveBeenCalledWith(
-      crawlError,
-      expect.anything(),
-      expect.anything(),
-    );
+    expect(handleCrawlerFailure).toHaveBeenCalledWith(crawlError);
   });
 
   test("history replacementsをcurrent dataと同じsave phaseへ渡す", async () => {

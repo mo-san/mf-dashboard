@@ -11,6 +11,7 @@ import {
   runSavePhase,
   runScrapePhase,
   runSetupPhase,
+  saveFailureSnapshot,
   type CrawlerRuntime,
 } from "./crawler-phases.js";
 import {
@@ -38,6 +39,7 @@ async function disposeGroupScope(
 export async function runCrawler(progress: CrawlerProgressReporter): Promise<void> {
   const config = runLoadPhase();
   let runtime: CrawlerRuntime | null = null;
+  let failureSnapshotSaved = false;
 
   try {
     const activeRuntime = await runSetupPhase(config);
@@ -99,6 +101,9 @@ export async function runCrawler(progress: CrawlerProgressReporter): Promise<voi
       );
     } catch (err) {
       crawlFailed = true;
+      // グループ復元がページを遷移させる前に、失敗した時点の画面を残す
+      await saveFailureSnapshot(activeRuntime.page);
+      failureSnapshotSaved = true;
       throw err;
     } finally {
       await disposeGroupScope(groupScope, crawlFailed);
@@ -131,7 +136,10 @@ export async function runCrawler(progress: CrawlerProgressReporter): Promise<voi
 
     info("Completed!");
   } catch (err) {
-    await handleCrawlerFailure(err, runtime?.page, config);
+    if (runtime && !failureSnapshotSaved) {
+      await saveFailureSnapshot(runtime.page);
+    }
+    await handleCrawlerFailure(err);
     throw err;
   } finally {
     try {

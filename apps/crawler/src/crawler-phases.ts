@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { analyzeFinancialData } from "@mf-dashboard/analytics";
 import { initDb, type Db } from "@mf-dashboard/db";
@@ -43,6 +43,8 @@ import { scrapeInstitutionCategories } from "./scrapers/institution-categories.j
 const DEFAULT_ENV_PATH = path.resolve(import.meta.dirname, "../../../.env");
 const DEFAULT_DB_PATH = path.join(import.meta.dirname, "../../../data/moneyforward.db");
 const DEBUG_DIR = path.resolve(import.meta.dirname, "../debug");
+const MAX_DEBUG_SCREENSHOTS = 10;
+const DEBUG_SCREENSHOT_PATTERN = /^error-(\d+)\.png$/;
 
 export interface CrawlerConfig {
   skipRefresh: boolean;
@@ -427,21 +429,8 @@ export async function runNotificationPhase(
   }
 }
 
-export async function handleCrawlerFailure(
-  err: unknown,
-  page: Page | undefined,
-  config: Pick<CrawlerConfig, "isDebug">,
-): Promise<void> {
+export async function handleCrawlerFailure(err: unknown): Promise<void> {
   error("Error occurred:", err);
-
-  if (config.isDebug && page) {
-    try {
-      const screenshotPath = await saveDebugScreenshot(page);
-      info(`Debug screenshot saved to ${screenshotPath}`);
-    } catch (screenshotError) {
-      error("Failed to save debug screenshot:", screenshotError);
-    }
-  }
 
   const errorForNotification = err instanceof Error ? err : new Error(String(err));
   try {
@@ -451,11 +440,72 @@ export async function handleCrawlerFailure(
   }
 }
 
-async function saveDebugScreenshot(page: Page, timestamp = Date.now()): Promise<string> {
-  const screenshotPath = getDebugScreenshotPath(timestamp);
+/**
+ * 失敗した時点の画面を残す。
+ *
+ * 後続の処理 (グループ復元など) がページを遷移させる前に呼ぶこと。
+ * 記録に失敗しても元のエラーを覆い隠さないよう、例外は投げない。
+ */
+export async function saveFailureSnapshot(page: Page, debugDir = DEBUG_DIR): Promise<void> {
+  try {
+    info(`Page at failure: ${formatPageLocation(page.url())}`);
+    const screenshotPath = await saveDebugScreenshot(page, debugDir);
+    info(`Debug screenshot saved to ${screenshotPath}`);
+    await pruneDebugScreenshots(debugDir);
+  } catch (snapshotError) {
+    error("Failed to save failure snapshot:", snapshotError);
+  }
+}
+
+/**
+ * ログに出せる形へURLを整える。
+ *
+ * クエリとフラグメントは落とし、識別子を含みうるパス要素は `:id` に置き換える。
+ */
+export function formatPageLocation(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "unknown";
+  }
+  if (parsed.origin === "null") {
+    return parsed.protocol;
+  }
+  const pathname = parsed.pathname
+    .split("/")
+    .map((segment) => (segment === "" || /^[a-z][a-z_-]*$/.test(segment) ? segment : ":id"))
+    .join("/");
+  return `${parsed.origin}${pathname}`;
+}
+
+async function saveDebugScreenshot(page: Page, debugDir: string): Promise<string> {
+  const screenshotPath = getDebugScreenshotPath(Date.now(), debugDir);
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   await page.screenshot({ path: screenshotPath, fullPage: true });
   return screenshotPath;
+}
+
+async function pruneDebugScreenshots(debugDir: string): Promise<void> {
+  const staleScreenshots = selectStaleDebugScreenshots(await readdir(debugDir));
+  await Promise.all(
+    staleScreenshots.map((fileName) => rm(path.join(debugDir, fileName), { force: true })),
+  );
+}
+
+/** 新しい順に `keep` 枚を残したとき、削除対象になるスクリーンショットのファイル名を返す */
+export function selectStaleDebugScreenshots(
+  fileNames: readonly string[],
+  keep = MAX_DEBUG_SCREENSHOTS,
+): string[] {
+  return fileNames
+    .flatMap((fileName) => {
+      const match = DEBUG_SCREENSHOT_PATTERN.exec(fileName);
+      return match ? [{ fileName, timestamp: Number(match[1]) }] : [];
+    })
+    .toSorted((a, b) => b.timestamp - a.timestamp)
+    .slice(keep)
+    .map((screenshot) => screenshot.fileName);
 }
 
 export function getDebugScreenshotPath(timestamp = Date.now(), debugDir = DEBUG_DIR): string {
