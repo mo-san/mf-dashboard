@@ -16,7 +16,7 @@ import { debug, info, warn } from "../logger.js";
 
 const OTP_CODE_PATTERN = /^\d{4,8}$/;
 
-export type OtpWaitEvent = "wait_started" | "code_received" | "timed_out";
+type OtpWaitEvent = "wait_started" | "code_received" | "timed_out";
 
 export interface WaitForOtpFileOptions {
   path: string;
