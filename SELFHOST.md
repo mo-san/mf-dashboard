@@ -59,7 +59,7 @@ OP_ITEM=
 OP_TOTP_FIELD=
 ```
 
-`compose.yml` は `cloudflared` 用の secret ファイル (`secrets/cloudflared-token`) を宣言しているが、`cloudflared` を起動しない限り存在しなくてよい (`docker compose --dry-run up -d migrate web crawler` で確認済み)。
+`compose.yml` は `cloudflared` 用の secret ファイル (`secrets/cloudflared-token`) を宣言しているが、`cloudflared` を起動しない限り存在しなくてよい。`compose.override.yml` が `cloudflared` を profile の裏へ置いているので、サービスを指定しない `docker compose up -d` では起動されない。
 
 ### ワンタイムコードの手渡し
 
@@ -113,11 +113,11 @@ WEB_PUBLISH=127.0.0.1:8765:8765  # ホスト内だけ (外からは Tailscale �
 
 ## 起動
 
-`cloudflared` を除く 3 サービスだけを起動する。
+`cloudflared` を除く 3 サービスが起動する (`cloudflared` は profile の裏にあり、`--profile cloudflared` を付けない限り対象にならない)。
 
 ```sh
 docker compose build
-docker compose up -d migrate web crawler
+docker compose up -d
 docker compose ps --all
 ```
 
