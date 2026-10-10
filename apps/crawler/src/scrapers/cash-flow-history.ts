@@ -3,7 +3,7 @@ import type { CashFlowSummary, CashFlowItem } from "@mf-dashboard/db/types";
 import { mfUrls } from "@mf-dashboard/meta/urls";
 import type { Locator, Page } from "playwright";
 import { getHistoryMonth } from "../history-months.js";
-import { log, debug } from "../logger.js";
+import { log, debug, warn } from "../logger.js";
 import { parseJapaneseNumber, convertDateToIso } from "../parsers.js";
 import type { CashFlowHistoryResult } from "../types.js";
 
@@ -27,8 +27,15 @@ const CASH_FLOW_AJAX_STATE = "__mfDashboardCashFlowAjax";
 const CASH_FLOW_AMOUNT_PATTERN =
   /^(?:(?:[+\-−▲][¥$]?)|(?:[¥$][+\-−▲]?))?(?:\d{1,3}(?:,\d{3})+|\d+)(?:円)?$/;
 
-function incompleteCashFlowRow(fields: string[]): Error {
-  return new Error(`Incomplete cash flow transaction row (${fields.join(", ")})`);
+class IncompleteCashFlowRowError extends Error {
+  constructor(fields: string[]) {
+    super(`Incomplete cash flow transaction row (${fields.join(", ")})`);
+    this.name = "IncompleteCashFlowRowError";
+  }
+}
+
+function incompleteCashFlowRow(fields: string[]): IncompleteCashFlowRowError {
+  return new IncompleteCashFlowRowError(fields);
 }
 
 export function isSupportedCashFlowAmount(value: string): boolean {
@@ -376,7 +383,23 @@ export async function extractCashFlowFromPage(
   page: Page,
   displayedPeriod?: { month: string; periodStart: string; periodEnd: string },
 ): Promise<CashFlowSummary> {
-  const { month, periodStart, periodEnd } = displayedPeriod ?? (await detectMonth(page));
+  const period = displayedPeriod ?? (await detectMonth(page));
+  try {
+    return await extractCashFlowOnce(page, period);
+  } catch (error) {
+    if (!(error instanceof IncompleteCashFlowRowError)) throw error;
+    // 行は 1 セルずつ短い上限で読むため、ホストが高負荷で一瞬止まっただけでも、読んでいる
+    // 最中に表が描き直されただけでも、実在する行を読み損ねる。表全体を 1 度だけ読み直し、
+    // それでも読めない行があれば不完全な月として失敗させる。
+    warn(`${error.message}; reading ${period.month} again`);
+    return extractCashFlowOnce(page, period);
+  }
+}
+
+async function extractCashFlowOnce(
+  page: Page,
+  { month, periodStart, periodEnd }: { month: string; periodStart: string; periodEnd: string },
+): Promise<CashFlowSummary> {
   const year = Number(month.slice(0, 4));
   debug(`  Extracting data for ${month}...`);
 
