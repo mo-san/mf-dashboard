@@ -309,6 +309,92 @@ describe("scrapeCashFlowHistory", () => {
   });
 });
 
+describe("extractCashFlowFromPage", () => {
+  const period = { month: "2026-07", periodStart: "2026-07-01", periodEnd: "2026-07-31" };
+
+  // 読み取り途中のタイムアウトは実サイトで決定的に起こせないため、Locator を差し替えて再現する
+  function createPage(readCategory: () => Promise<string>) {
+    const summaryCell = {
+      textContent: vi.fn<Locator["textContent"]>().mockResolvedValue("0"),
+    } as unknown as Locator;
+    const summaryCells = {
+      nth: vi.fn<(index: number) => Locator>().mockReturnValue(summaryCell),
+    } as unknown as Locator;
+    const summaryRow = {
+      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(summaryCells),
+    } as unknown as Locator;
+    const summaryRows = {
+      first: vi.fn<() => Locator>().mockReturnValue(summaryRow),
+    } as unknown as Locator;
+    const missingChild = {
+      count: vi.fn<() => Promise<number>>().mockResolvedValue(0),
+    } as unknown as Locator;
+    const accountCell = {
+      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(missingChild),
+      textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(""),
+    } as unknown as Locator;
+    const texts = new Map([
+      [1, "07/01"],
+      [2, "Transaction A"],
+      [3, "1,000"],
+    ]);
+    const readCategoryCell = vi.fn<Locator["textContent"]>().mockImplementation(readCategory);
+    const categoryCell = { textContent: readCategoryCell } as unknown as Locator;
+    const cells = {
+      nth: vi.fn<(index: number) => Locator>((index) => {
+        if (index === 4) return accountCell;
+        if (index === 5) return categoryCell;
+        return {
+          textContent: vi.fn<Locator["textContent"]>().mockResolvedValue(texts.get(index) ?? ""),
+        } as unknown as Locator;
+      }),
+    } as unknown as Locator;
+    const row = {
+      getAttribute: vi
+        .fn<Locator["getAttribute"]>()
+        .mockImplementation(async (name) => (name === "id" ? "js-transaction-row-a" : "")),
+      locator: vi.fn<(selector: string) => Locator>().mockReturnValue(cells),
+    } as unknown as Locator;
+    const detailRows = {
+      count: vi.fn<() => Promise<number>>().mockResolvedValue(1),
+      nth: vi.fn<(index: number) => Locator>().mockReturnValue(row),
+    } as unknown as Locator;
+    const page = {
+      locator: vi.fn<(selector: string) => Locator>().mockImplementation((selector) => {
+        if (selector === "#monthly_total_table_kakeibo tbody tr") return summaryRows;
+        return detailRows;
+      }),
+    } as unknown as Page;
+    return { page, readCategoryCell };
+  }
+
+  test("行を一度読み損ねても、読み直して揃えば月次結果を返す", async () => {
+    let attempts = 0;
+    const { page, readCategoryCell } = createPage(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("Timeout 1000ms exceeded");
+      return "";
+    });
+
+    const result = await extractCashFlowFromPage(page, period);
+
+    expect(result.isComplete).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(readCategoryCell).toHaveBeenCalledTimes(2);
+  });
+
+  test("読み直しても読めない行があれば月次結果を返さない", async () => {
+    const { page, readCategoryCell } = createPage(async () => {
+      throw new Error("Timeout 1000ms exceeded");
+    });
+
+    await expect(extractCashFlowFromPage(page, period)).rejects.toThrow(
+      "Incomplete cash flow transaction row (category)",
+    );
+    expect(readCategoryCell).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("parseDetailRow", () => {
   test("正常に取得した空の内容欄を保持する", async () => {
     const missingChild = {

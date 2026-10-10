@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { categorizeCashFlowMonth } from "./category-decision/categorize-cash-flow.js";
 import {
   formatPageLocation,
+  getDebugDir,
   getDebugScreenshotPath,
   loadCrawlerConfig,
   runCashFlowHistoryPhase,
@@ -224,6 +225,21 @@ describe("loadCrawlerConfig", () => {
     expect(config.isHistoryMode).toBe(true);
     expect(config.isDebug).toBe(true);
     expect(config.isHeaded).toBe(true);
+  });
+});
+
+describe("getDebugDir", () => {
+  test("CRAWLER_DEBUG_DIR が未設定または空白だけなら crawler の debug を返す", () => {
+    const defaultDir = getDebugDir({});
+
+    expect(defaultDir).toBe(path.resolve(import.meta.dirname, "../debug"));
+    expect(getDebugDir({ CRAWLER_DEBUG_DIR: "  " })).toBe(defaultDir);
+  });
+
+  test("CRAWLER_DEBUG_DIR が設定されていればその場所を返す", () => {
+    const configuredDir = path.join("/tmp", "data", "debug");
+
+    expect(getDebugDir({ CRAWLER_DEBUG_DIR: ` ${configuredDir} ` })).toBe(configuredDir);
   });
 });
 

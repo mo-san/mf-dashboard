@@ -42,7 +42,7 @@ import { scrapeInstitutionCategories } from "./scrapers/institution-categories.j
 
 const DEFAULT_ENV_PATH = path.resolve(import.meta.dirname, "../../../.env");
 const DEFAULT_DB_PATH = path.join(import.meta.dirname, "../../../data/moneyforward.db");
-const DEBUG_DIR = path.resolve(import.meta.dirname, "../debug");
+const DEFAULT_DEBUG_DIR = path.resolve(import.meta.dirname, "../debug");
 const MAX_DEBUG_SCREENSHOTS = 10;
 const DEBUG_SCREENSHOT_PATTERN = /^error-(\d+)\.png$/;
 
@@ -446,7 +446,7 @@ export async function handleCrawlerFailure(err: unknown): Promise<void> {
  * 後続の処理 (グループ復元など) がページを遷移させる前に呼ぶこと。
  * 記録に失敗しても元のエラーを覆い隠さないよう、例外は投げない。
  */
-export async function saveFailureSnapshot(page: Page, debugDir = DEBUG_DIR): Promise<void> {
+export async function saveFailureSnapshot(page: Page, debugDir = getDebugDir()): Promise<void> {
   try {
     info(`Page at failure: ${formatPageLocation(page.url())}`);
     const screenshotPath = await saveDebugScreenshot(page, debugDir);
@@ -508,6 +508,17 @@ export function selectStaleDebugScreenshots(
     .map((screenshot) => screenshot.fileName);
 }
 
-export function getDebugScreenshotPath(timestamp = Date.now(), debugDir = DEBUG_DIR): string {
+/**
+ * 失敗時の画面を保存するディレクトリを返す。
+ *
+ * コンテナでは実行ユーザーがソースツリーへ書けないため、`CRAWLER_DEBUG_DIR` で
+ * 書き込める場所 (ホストへ bind mount した data/ 配下など) へ向けられるようにしてある。
+ */
+export function getDebugDir(env: NodeJS.ProcessEnv = process.env): string {
+  const configuredDir = env.CRAWLER_DEBUG_DIR?.trim();
+  return configuredDir ? path.resolve(configuredDir) : DEFAULT_DEBUG_DIR;
+}
+
+export function getDebugScreenshotPath(timestamp = Date.now(), debugDir = getDebugDir()): string {
   return path.join(debugDir, `error-${timestamp}.png`);
 }
