@@ -25,6 +25,7 @@
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `apps/crawler/src/auth/credentials.ts`  | `CREDENTIALS_SOURCE` に `env` を指定すると 1Password SDK を呼ばず環境変数から読む。既定は `1password` で上流互換 |
 | `apps/web/src/lib/cloudflare-access.ts` | `AUTH_MODE=trusted-network` のとき Access JWT の検証を省く                                                       |
+| `apps/crawler/src/crawler-phases.ts`    | crawl が失敗した時点の画面を保存する。保存先は `CRAWLER_DEBUG_DIR` で変えられる                                  |
 | `compose.override.yml`                  | web を LAN へ publish し、追加した環境変数をコンテナへ渡す                                                       |
 
 `compose.yml`・`terraform/`・`pnpm-lock.yaml` は変更しない。上流を継続的に取り込めるようにするためで、依存パッケージも追加しない。
@@ -92,6 +93,18 @@ grep wait_started data/otp-events.jsonl | tail -20
 待機上限は既定 300 秒だが、定時実行で通報に気付いてから応じる余裕を見るなら `OTP_WAIT_TIMEOUT_SECONDS` を延ばす。
 
 TOTP を有効にすれば手渡しは不要になる。実装するときも依存パッケージは足さず `node:crypto` で書く。
+
+### 失敗した時点の画面
+
+crawl が失敗すると、その時点の画面を `data/debug/error-<タイムスタンプ>.png` へ保存する (新しい順に 10 枚まで)。失敗の通知が届いたら、ログと合わせてここを見る。
+
+```sh
+ls -lt data/debug | head
+```
+
+画像には資産額や取引の内容がそのまま写る。`data/` は `.gitignore` 済みだが、外へ持ち出すときは DB と同じ扱いにする。
+
+保存先は `compose.override.yml` が `CRAWLER_DEBUG_DIR` で `/app/data/debug` に向けている。既定の `apps/crawler/debug` はイメージ内のソースツリーで、コンテナの実行ユーザーには書けない。
 
 ## 到達範囲を変えたいとき
 

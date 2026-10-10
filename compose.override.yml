@@ -35,3 +35,7 @@ services:
       OTP_CODE_FILE: /app/data/otp-code.txt
       OTP_WAIT_TIMEOUT_SECONDS: ${OTP_WAIT_TIMEOUT_SECONDS:-}
       OTP_EVENT_LOG: ${OTP_EVENT_LOG:-}
+      # 失敗した時点の画面の保存先。既定の apps/crawler/debug はイメージ内のソースツリーで、
+      # コンテナの実行ユーザーは書けない (EACCES で画面が残らない)。data/ ならホストから
+      # そのまま開け、コンテナを作り直しても残る
+      CRAWLER_DEBUG_DIR: /app/data/debug
